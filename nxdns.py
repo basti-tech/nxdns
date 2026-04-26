@@ -37,6 +37,14 @@ def process_dns_query(data, protocol_name, client_ip, client_port):
         raise ValueError("Invalid DNS packet")
 
 class ThreadPoolMixIn:
+    def process_request_thread(self, request, client_address):
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            self.shutdown_request(request)
+
     def process_request(self, request, client_address):
         self.executor.submit(self.process_request_thread, request, client_address)
 
