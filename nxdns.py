@@ -51,32 +51,36 @@ class ThreadPoolMixIn:
 
 class PoolUDPServer(ThreadPoolMixIn, socketserver.UDPServer):
     def __init__(self, server_address, RequestHandlerClass, max_workers=100, bind_and_activate=True):
+        host = server_address[0]
+        self.address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
     def server_close(self):
         super().server_close()
         self.executor.shutdown(wait=False)
 
 class PoolTCPServer(ThreadPoolMixIn, socketserver.TCPServer):
     def __init__(self, server_address, RequestHandlerClass, max_workers=100, bind_and_activate=True):
-        self.address_family = socket.AF_INET6 if ":" in server_address[0] or server_address[0] == "" else socket.AF_INET
+        host = server_address[0]
+        self.address_family = socket.AF_INET6 if ":" in host else socket.AF_INET
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
     def server_close(self):
         super().server_close()
         self.executor.shutdown(wait=False)
 
-class DualStackPoolUDPServer(PoolUDPServer):
-    def server_bind(self):
-        if self.address_family == socket.AF_INET6:
-            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-        super().server_bind()
+# Aliases kept for clarity at call sites
+DualStackPoolUDPServer = PoolUDPServer
+DualStackPoolTCPServer = PoolTCPServer
 
-class DualStackPoolTCPServer(PoolTCPServer):
-    def server_bind(self):
-        if self.address_family == socket.AF_INET6:
-            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-        super().server_bind()
 
 class BaseRequestHandler(socketserver.BaseRequestHandler):
 
@@ -140,21 +144,34 @@ class DoHRequestHandler(http.server.BaseHTTPRequestHandler):
 
 
 class TCPRequestHandler(BaseRequestHandler):
+    MAX_DNS_PACKET = 4096  # DNS messages over TCP are never legitimately larger
+
+    def setup(self):
+        super().setup()
+        self.request.settimeout(5)  # prevent slow-read attacks
 
     def get_data(self):
-        data = self.request.recv(8192)
-        if len(data) < 2:
-            raise Exception("TCP packet too small")
-        sz = struct.unpack('>H', data[:2])[0]
-        if sz < len(data) - 2:
-            raise Exception("Wrong size of TCP packet")
-        elif sz > len(data) - 2:
-            raise Exception("Too big TCP packet")
-        return data[2:]
+        raw_len = self._recv_exact(2)
+        sz = struct.unpack('>H', raw_len)[0]
+        if sz == 0:
+            raise Exception("TCP packet has zero length")
+        if sz > self.MAX_DNS_PACKET:
+            raise Exception(f"TCP packet too large: {sz} bytes (max {self.MAX_DNS_PACKET})")
+        return self._recv_exact(sz)
+
+    def _recv_exact(self, n):
+        buf = b''
+        while len(buf) < n:
+            chunk = self.request.recv(n - len(buf))
+            if not chunk:
+                raise Exception("Connection closed before complete packet received")
+            buf += chunk
+        return buf
 
     def send_data(self, data):
         sz = struct.pack('>H', len(data))
         return self.request.sendall(sz + data)
+
 
 class UDPRequestHandler(BaseRequestHandler):
 

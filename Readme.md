@@ -123,28 +123,50 @@ You can test the different protocols locally using tools like `dig` (from BIND) 
 ```bash
 dig @127.0.0.1 -p 53 example.com
 ```
+Look for `status: NXDOMAIN` in the output header.
 
 **Test TCP (Port 53):**
 ```bash
 dig +tcp @127.0.0.1 -p 53 example.com
 ```
+Look for `status: NXDOMAIN` in the output header.
 
 **Test DoT - DNS over TLS (Port 853):**
 *(Note: testing encrypted protocols usually requires valid TLS certificates or skipping validation)*
 ```bash
 kdig -d @127.0.0.1 +tls +tls-host=localhost -p 853 example.com
 ```
+Look for `status: NXDOMAIN` in the output header.
 
 **Test DoH - DNS over HTTPS (Port 443):**
 *(Note: Since the lightweight server uses HTTP/1.1, use `curl` instead of `kdig` which strictly requires HTTP/2)*
+
+Parse the RCODE directly from the binary response using `xxd`:
 ```bash
-curl -k -s -H "accept: application/dns-message" "https://127.0.0.1:443/dns-query?dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB" | hexdump -C
+HEX=$(curl -k -s -H "accept: application/dns-message" \
+  "https://127.0.0.1:443/dns-query?dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB" \
+  | xxd -p | tr -d '\n')
+RCODE=$(( 16#${HEX:6:2} & 15 ))
+ANCOUNT=$(( (16#${HEX:12:2} << 8) | 16#${HEX:14:2} ))
+[ $RCODE -eq 3 ] && echo "RCODE: $RCODE (NXDOMAIN ✓)" || echo "RCODE: $RCODE (unexpected!)"
+echo "ANCOUNT: $ANCOUNT"
 ```
+
+Expected output:
+```
+RCODE: 3 (NXDOMAIN ✓)
+ANCOUNT: 0
+```
+
+*(Requires `xxd`, available via `apt install xxd` or part of `vim-common`)*
+
 
 **Test DoQ - DNS over QUIC (Port 853):**
 ```bash
 kdig -d @127.0.0.1 +quic -p 853 example.com
 ```
+Look for `status: NXDOMAIN` in the output header.
+
 
 ## Logging
 
