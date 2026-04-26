@@ -111,6 +111,36 @@ doq = false
 doq_port = 853
 ```
 
+## Testing
+
+You can test the different protocols locally using tools like `dig` (from BIND) and `kdig` (from Knot DNS). 
+
+**Test UDP (Port 53):**
+```bash
+dig @127.0.0.1 -p 53 example.com
+```
+
+**Test TCP (Port 53):**
+```bash
+dig +tcp @127.0.0.1 -p 53 example.com
+```
+
+**Test DoT - DNS over TLS (Port 853):**
+*(Note: testing encrypted protocols usually requires valid TLS certificates or skipping validation)*
+```bash
+kdig -d @127.0.0.1 +tls +tls-host=localhost -p 853 example.com
+```
+
+**Test DoH - DNS over HTTPS (Port 443):**
+```bash
+kdig -d @127.0.0.1 +https=/dns-query -p 443 example.com
+```
+
+**Test DoQ - DNS over QUIC (Port 853):**
+```bash
+kdig -d @127.0.0.1 +quic -p 853 example.com
+```
+
 ## Logging
 
 `nxdns` automatically logs all queries both to standard output and to a local log file (default `dns_log.txt`) in the same directory. The log file is automatically rotated when it reaches the configured max size (keeping up to 5 older backups). The log entries include:
