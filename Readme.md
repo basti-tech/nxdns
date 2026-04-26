@@ -51,6 +51,7 @@ python nxdns.py --udp --tcp
 ### Arguments
 
 - `-c`, `--config`: Path to the configuration file (default is `nxdns.conf`).
+- `--host`: The interface to listen on (default is `127.0.0.1`). Use `::` or `""` for all interfaces with DualStack support.
 - `--port`: The port to listen on (default is `53`).
 - `--tcp`: Listen to TCP connections.
 - `--udp`: Listen to UDP datagrams.
@@ -89,6 +90,7 @@ Instead of passing all parameters via the command line, you can use a configurat
 Example `nxdns.conf`:
 ```ini
 [nxdns]
+host = 127.0.0.1
 port = 53
 udp = true
 tcp = true
@@ -134,8 +136,9 @@ kdig -d @127.0.0.1 +tls +tls-host=localhost -p 853 example.com
 ```
 
 **Test DoH - DNS over HTTPS (Port 443):**
+*(Note: Since the lightweight server uses HTTP/1.1, use `curl` instead of `kdig` which strictly requires HTTP/2)*
 ```bash
-kdig -d @127.0.0.1 +https=/dns-query -p 443 example.com
+curl -k -s -H "accept: application/dns-message" "https://127.0.0.1:443/dns-query?dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB" | hexdump -C
 ```
 
 **Test DoQ - DNS over QUIC (Port 853):**

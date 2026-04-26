@@ -13,6 +13,7 @@ logger = logging.getLogger('nxdns')
 import ssl
 import configparser
 import os
+import socket
 import http.server
 import urllib.parse
 import base64
@@ -58,11 +59,24 @@ class PoolUDPServer(ThreadPoolMixIn, socketserver.UDPServer):
 
 class PoolTCPServer(ThreadPoolMixIn, socketserver.TCPServer):
     def __init__(self, server_address, RequestHandlerClass, max_workers=100, bind_and_activate=True):
+        self.address_family = socket.AF_INET6 if ":" in server_address[0] or server_address[0] == "" else socket.AF_INET
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
     def server_close(self):
         super().server_close()
         self.executor.shutdown(wait=False)
+
+class DualStackPoolUDPServer(PoolUDPServer):
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+class DualStackPoolTCPServer(PoolTCPServer):
+    def server_bind(self):
+        if self.address_family == socket.AF_INET6:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
 
 class BaseRequestHandler(socketserver.BaseRequestHandler):
 
@@ -175,6 +189,7 @@ def start_doq_server(host, port, cert, key):
 def main():
     parser = argparse.ArgumentParser(description='Start a Fake DNS implemented in Python. Only returns NXDOMAIN and logs requests into a file. Usually DNSes use UDP on port 53.')
     parser.add_argument('-c', '--config', type=str, help='Path to configuration file.')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='The interface to listen on (default: 127.0.0.1). Use :: or "" for all interfaces with DualStack support.')
     parser.add_argument('--port', type=int, default=53, help='The port to listen on (default: 53).')
     parser.add_argument('--tcp', action='store_true', help='Listen to TCP connections.')
     parser.add_argument('--udp', action='store_true', help='Listen to UDP datagrams.')
@@ -209,7 +224,7 @@ def main():
                 if k in sec: config[k] = sec.getboolean(k)
             for k in ['port', 'tls_port', 'doh_port', 'doq_port', 'max_log_size', 'workers']:
                 if k in sec: config[k] = sec.getint(k)
-            for k in ['cert', 'key', 'log_file']:
+            for k in ['cert', 'key', 'log_file', 'host']:
                 if k in sec: config[k] = sec.get(k)
 
     if not (config['udp'] or config['tcp'] or config['tls'] or config['doh'] or config['doq']): 
@@ -232,25 +247,25 @@ def main():
     logger.info("Starting nameserver...")
 
     servers = []
-    if config['udp']: servers.append(PoolUDPServer(('', config['port']), UDPRequestHandler, max_workers=config['workers']))
-    if config['tcp']: servers.append(PoolTCPServer(('', config['port']), TCPRequestHandler, max_workers=config['workers']))
+    if config['udp']: servers.append(DualStackPoolUDPServer((config['host'], config['port']), UDPRequestHandler, max_workers=config['workers']))
+    if config['tcp']: servers.append(DualStackPoolTCPServer((config['host'], config['port']), TCPRequestHandler, max_workers=config['workers']))
     
     if config['tls'] or config['doh']:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(certfile=config['cert'], keyfile=config['key'])
         
         if config['tls']:
-            tls_server = PoolTCPServer(('', config['tls_port']), TCPRequestHandler, max_workers=config['workers'])
+            tls_server = DualStackPoolTCPServer((config['host'], config['tls_port']), TCPRequestHandler, max_workers=config['workers'])
             tls_server.socket = context.wrap_socket(tls_server.socket, server_side=True)
             servers.append(tls_server)
         
         if config['doh']:
-            doh_server = PoolTCPServer(('', config['doh_port']), DoHRequestHandler, max_workers=config['workers'])
+            doh_server = DualStackPoolTCPServer((config['host'], config['doh_port']), DoHRequestHandler, max_workers=config['workers'])
             doh_server.socket = context.wrap_socket(doh_server.socket, server_side=True)
             servers.append(doh_server)
 
     if config['doq']:
-        doq_thread = threading.Thread(target=start_doq_server, args=('', config['doq_port'], config['cert'], config['key']))
+        doq_thread = threading.Thread(target=start_doq_server, args=(config['host'], config['doq_port'], config['cert'], config['key']))
         doq_thread.daemon = True
         doq_thread.start()
 

@@ -1,4 +1,8 @@
 [nxdns]
+# The interface to listen on (default: 127.0.0.1)
+# Use :: or "" for all interfaces with DualStack (IPv4+IPv6) support
+host = 127.0.0.1
+
 # The port to listen on
 port = 53
 
