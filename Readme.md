@@ -36,6 +36,7 @@ python nxdns.py --udp --tcp
 - `--cert`: Path to the TLS certificate (required for `--tls`).
 - `--key`: Path to the TLS private key (required for `--tls`).
 - `--max-log-size`: Maximum size of the log file in MB before rotation (default is `5`).
+- `--log-file`: Path to the log file (default is `dns_log.txt`).
 
 *Note: You must specify at least one of `--udp`, `--tcp`, or `--tls`.*
 
@@ -64,6 +65,7 @@ port = 53
 udp = true
 tcp = true
 max_log_size = 10
+log_file = /var/log/nxdns.log
 
 # TLS Support
 tls = false
@@ -74,7 +76,7 @@ key = key.pem
 
 ## Logging
 
-`nxdns` automatically logs all queries both to standard output and to a local `dns_log.txt` file in the same directory. The log file is automatically rotated when it reaches 5 MB (keeping up to 5 older backups). The log entries include:
+`nxdns` automatically logs all queries both to standard output and to a local log file (default `dns_log.txt`) in the same directory. The log file is automatically rotated when it reaches the configured max size (keeping up to 5 older backups). The log entries include:
 - The time of the request
 - The protocol used (UDP/TCP)
 - The client IP address and port

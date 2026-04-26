@@ -11,6 +11,9 @@ tcp = true
 # Maximum log file size in Megabytes (MB)
 max_log_size = 5
 
+# Path to the log file
+log_file = dns_log.txt
+
 # DNS over TLS Support
 # tls = false
 # tls_port = 853

@@ -81,6 +81,7 @@ def main():
     parser.add_argument('--cert', type=str, help='Path to the TLS certificate file (required for DoT).')
     parser.add_argument('--key', type=str, help='Path to the TLS private key file (required for DoT).')
     parser.add_argument('--max-log-size', type=int, help='Maximum log file size in MB.')
+    parser.add_argument('--log-file', type=str, help='Path to the log file (default: dns_log.txt).')
     args = parser.parse_args()
 
     config = {
@@ -91,7 +92,8 @@ def main():
         'tls_port': 853,
         'cert': None,
         'key': None,
-        'max_log_size': 5
+        'max_log_size': 5,
+        'log_file': 'nxdns_log.txt'
     }
 
     config_file = args.config if args.config else 'nxdns.conf'
@@ -108,6 +110,7 @@ def main():
             if 'cert' in sec: config['cert'] = sec.get('cert')
             if 'key' in sec: config['key'] = sec.get('key')
             if 'max_log_size' in sec: config['max_log_size'] = sec.getint('max_log_size')
+            if 'log_file' in sec: config['log_file'] = sec.get('log_file')
 
     # CLI overrides
     if args.port is not None: config['port'] = args.port
@@ -118,6 +121,7 @@ def main():
     if args.cert is not None: config['cert'] = args.cert
     if args.key is not None: config['key'] = args.key
     if args.max_log_size is not None: config['max_log_size'] = args.max_log_size
+    if args.log_file is not None: config['log_file'] = args.log_file
 
     if not (config['udp'] or config['tcp'] or config['tls']): 
         parser.error("Please select at least one of --udp, --tcp, or --tls (via CLI or config file).")
@@ -126,7 +130,7 @@ def main():
 
     logger = logging.getLogger('nxdns')
     logger.setLevel(logging.INFO)
-    fh = RotatingFileHandler('dns_log.txt', maxBytes=config['max_log_size']*1024*1024, backupCount=5)
+    fh = RotatingFileHandler(config['log_file'], maxBytes=config['max_log_size']*1024*1024, backupCount=5)
     fh.setLevel(logging.INFO)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
