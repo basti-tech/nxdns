@@ -23,3 +23,7 @@ log_file = dns_log.txt
 # HTTPS Support (DoH)
 # doh = false
 # doh_port = 443
+
+# QUIC Support (DoQ)
+# doq = false
+# doq_port = 853

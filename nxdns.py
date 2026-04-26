@@ -15,6 +15,10 @@ import urllib.parse
 import base64
 from logging.handlers import RotatingFileHandler
 from dnslib import *
+import asyncio
+from aioquic.asyncio import QuicConnectionProtocol, serve
+from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.events import StreamDataReceived
 
 def dns_response(data):
     request = DNSRecord.parse(data)
@@ -121,6 +125,30 @@ class UDPRequestHandler(BaseRequestHandler):
     def send_data(self, data):
         return self.request[1].sendto(data, self.client_address)
 
+class DoQProtocol(QuicConnectionProtocol):
+    def quic_event_received(self, event):
+        if isinstance(event, StreamDataReceived):
+            try:
+                peername = self._transport.get_extra_info('peername')
+                client_ip = peername[0] if peername else "Unknown"
+                client_port = peername[1] if peername else 0
+                response = process_dns_query(event.data, "DoQ", client_ip, client_port)
+                self._quic.send_stream_data(event.stream_id, response, end_stream=True)
+                self.transmit()
+            except Exception as e:
+                logger = logging.getLogger('nxdns')
+                logger.error("DoQ error: %s", e)
+
+def start_doq_server(host, port, cert, key):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    configuration = QuicConfiguration(is_client=False, alpn_protocols=["doq"])
+    configuration.load_cert_chain(cert, key)
+    loop.run_until_complete(serve(host, port, configuration=configuration, create_protocol=DoQProtocol))
+    logger = logging.getLogger('nxdns')
+    logger.info("DoQ server loop running in background asyncio loop")
+    loop.run_forever()
+
 def main():
     parser = argparse.ArgumentParser(description='Start a Fake DNS implemented in Python. Only returns NXDOMAIN and logs requests into a file. Usually DNSes use UDP on port 53.')
     parser.add_argument('-c', '--config', type=str, help='Path to configuration file.')
@@ -131,10 +159,12 @@ def main():
     parser.add_argument('--tls-port', type=int, help='The port for DoT (default: 853).')
     parser.add_argument('--doh', action='store_true', help='Listen to DNS over HTTPS (DoH).')
     parser.add_argument('--doh-port', type=int, help='The port for DoH (default: 443).')
-    parser.add_argument('--cert', type=str, help='Path to the TLS certificate file (required for DoT/DoH).')
-    parser.add_argument('--key', type=str, help='Path to the TLS private key file (required for DoT/DoH).')
+    parser.add_argument('--cert', type=str, help='Path to the TLS certificate file (required for DoT/DoH/DoQ).')
+    parser.add_argument('--key', type=str, help='Path to the TLS private key file (required for DoT/DoH/DoQ).')
     parser.add_argument('--max-log-size', type=int, help='Maximum log file size in MB.')
     parser.add_argument('--log-file', type=str, help='Path to the log file (default: dns_log.txt).')
+    parser.add_argument('--doq', action='store_true', help='Listen to DNS over QUIC (DoQ). Requires aioquic.')
+    parser.add_argument('--doq-port', type=int, help='The port for DoQ (default: 853).')
     args = parser.parse_args()
 
     config = {
@@ -145,6 +175,8 @@ def main():
         'tls_port': 853,
         'doh': False,
         'doh_port': 443,
+        'doq': False,
+        'doq_port': 853,
         'cert': None,
         'key': None,
         'max_log_size': 5,
@@ -166,6 +198,8 @@ def main():
             if 'doh_port' in sec: config['doh_port'] = sec.getint('doh_port')
             if 'cert' in sec: config['cert'] = sec.get('cert')
             if 'key' in sec: config['key'] = sec.get('key')
+            if 'doq' in sec: config['doq'] = sec.getboolean('doq')
+            if 'doq_port' in sec: config['doq_port'] = sec.getint('doq_port')
             if 'max_log_size' in sec: config['max_log_size'] = sec.getint('max_log_size')
             if 'log_file' in sec: config['log_file'] = sec.get('log_file')
 
@@ -177,15 +211,18 @@ def main():
     if args.tls_port is not None: config['tls_port'] = args.tls_port
     if args.doh: config['doh'] = True
     if args.doh_port is not None: config['doh_port'] = args.doh_port
+    if args.doq: config['doq'] = True
+    if args.doq_port is not None: config['doq_port'] = args.doq_port
     if args.cert is not None: config['cert'] = args.cert
     if args.key is not None: config['key'] = args.key
     if args.max_log_size is not None: config['max_log_size'] = args.max_log_size
     if args.log_file is not None: config['log_file'] = args.log_file
 
-    if not (config['udp'] or config['tcp'] or config['tls'] or config['doh']): 
-        parser.error("Please select at least one of --udp, --tcp, --tls, or --doh (via CLI or config file).")
-    if (config['tls'] or config['doh']) and (not config['cert'] or not config['key']): 
-        parser.error("--tls and --doh require --cert and --key to be provided.")
+    if not (config['udp'] or config['tcp'] or config['tls'] or config['doh'] or config['doq']): 
+        parser.error("Please select at least one of --udp, --tcp, --tls, --doh, or --doq (via CLI or config file).")
+    if (config['tls'] or config['doh'] or config['doq']) and (not config['cert'] or not config['key']): 
+        parser.error("--tls, --doh, and --doq require --cert and --key to be provided.")
+
 
     logger = logging.getLogger('nxdns')
     logger.setLevel(logging.INFO)
@@ -218,6 +255,11 @@ def main():
             doh_server = socketserver.ThreadingTCPServer(('', config['doh_port']), DoHRequestHandler)
             doh_server.socket = context.wrap_socket(doh_server.socket, server_side=True)
             servers.append(doh_server)
+
+    if config['doq']:
+        doq_thread = threading.Thread(target=start_doq_server, args=('', config['doq_port'], config['cert'], config['key']))
+        doq_thread.daemon = True
+        doq_thread.start()
 
     for s in servers:
         thread = threading.Thread(target=s.serve_forever)  # that thread will start one more thread for each request

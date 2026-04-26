@@ -10,13 +10,35 @@ This is particularly useful for sinkholing, testing network applications, malwar
 - Supports both UDP and TCP connections on port 53 (or a custom port).
 - Supports DNS over TLS (DoT) on port 853.
 - Supports DNS over HTTPS (DoH) on port 443.
+- Supports DNS over QUIC (DoQ) on port 853.
 - Multi-threaded: handles each request in a separate thread.
 - Logs all incoming requests (including the requested domain, IP, and protocol) to the console and a file (`dns_log.txt`) with log rotation.
 
-## Requirements
+## Requirements & Installation
 
 - Python 3.x
-- `dnslib` (Can be installed via `pip install dnslib`)
+
+It is highly recommended to install the dependencies in a Python virtual environment (`venv`). To set it up, follow these steps:
+
+1. Create a virtual environment:
+   ```bash
+   python -m venv venv
+   ```
+
+2. Activate the virtual environment:
+   - On **Windows**:
+     ```bash
+     venv\Scripts\activate
+     ```
+   - On **Linux/macOS**:
+     ```bash
+     source venv/bin/activate
+     ```
+
+3. Install the required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Usage
 
@@ -36,8 +58,10 @@ python nxdns.py --udp --tcp
 - `--tls-port`: The port for DoT (default is `853`).
 - `--doh`: Listen to DNS over HTTPS (DoH) connections.
 - `--doh-port`: The port for DoH (default is `443`).
-- `--cert`: Path to the TLS certificate (required for `--tls` and `--doh`).
-- `--key`: Path to the TLS private key (required for `--tls` and `--doh`).
+- `--doq`: Listen to DNS over QUIC (DoQ) connections. (Requires `aioquic` library).
+- `--doq-port`: The port for DoQ (default is `853`).
+- `--cert`: Path to the TLS certificate (required for `--tls`, `--doh`, and `--doq`).
+- `--key`: Path to the TLS private key (required for `--tls`, `--doh`, and `--doq`).
 - `--max-log-size`: Maximum size of the log file in MB before rotation (default is `5`).
 - `--log-file`: Path to the log file (default is `dns_log.txt`).
 
@@ -79,6 +103,10 @@ key = key.pem
 # HTTPS Support (DoH)
 doh = false
 doh_port = 443
+
+# QUIC Support (DoQ)
+doq = false
+doq_port = 853
 ```
 
 ## Logging
