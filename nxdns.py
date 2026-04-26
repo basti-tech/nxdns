@@ -232,10 +232,17 @@ class DoQProtocol(QuicConnectionProtocol):
 
 
 
-def start_doq_server(configuration, sock):
+def start_doq_server(cert, key, host, port, ready_event):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(serve(configuration=configuration, create_protocol=DoQProtocol, sock=sock))
+    configuration = QuicConfiguration(is_client=False, alpn_protocols=["doq"])
+    configuration.load_cert_chain(cert, key)
+
+    async def _serve():
+        await serve(host, port, configuration=configuration, create_protocol=DoQProtocol)
+        ready_event.set()  # socket is now bound, main thread can drop privileges
+
+    loop.run_until_complete(_serve())
     logger.info("DoQ server loop running in background asyncio loop")
     loop.run_forever()
 
@@ -319,20 +326,17 @@ def main():
             doh_server.socket = context.wrap_socket(doh_server.socket, server_side=True)
             servers.append(doh_server)
 
+    doq_ready = None
     if config['doq']:
-        # Pre-build config and pre-bind socket as root so both survive the privilege drop
-        doq_configuration = QuicConfiguration(is_client=False, alpn_protocols=["doq"])
-        doq_configuration.load_cert_chain(config['cert'], config['key'])
-        host = config['host']
-        af = socket.AF_INET6 if ':' in host else socket.AF_INET
-        doq_sock = socket.socket(af, socket.SOCK_DGRAM)
-        if af == socket.AF_INET6:
-            doq_sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-        doq_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        doq_sock.bind((host, config['doq_port']))
-        doq_thread = threading.Thread(target=start_doq_server, args=(doq_configuration, doq_sock))
+        doq_ready = threading.Event()
+        doq_thread = threading.Thread(target=start_doq_server,
+            args=(config['cert'], config['key'], config['host'], config['doq_port'], doq_ready))
         doq_thread.daemon = True
         doq_thread.start()
+        # Wait for DoQ to bind its socket (as root) before dropping privileges
+        if not doq_ready.wait(timeout=10):
+            logger.error("DoQ server failed to start within 10 seconds")
+            sys.exit(1)
 
     # All sockets are now bound — safe to drop root privileges
     if config.get('user'):
