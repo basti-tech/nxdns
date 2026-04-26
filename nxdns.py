@@ -14,6 +14,8 @@ import ssl
 import configparser
 import os
 import socket
+import pwd
+import grp
 import http.server
 import urllib.parse
 import base64
@@ -23,6 +25,26 @@ import asyncio
 from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived
+
+def drop_privileges(user, group=None):
+    """Drop root privileges to the specified user/group after sockets are bound."""
+    if os.getuid() != 0:
+        logger.warning("--user specified but not running as root, skipping privilege drop.")
+        return
+    try:
+        pw = pwd.getpwnam(user)
+        target_uid = pw.pw_uid
+        target_gid = grp.getgrnam(group).gr_gid if group else pw.pw_gid
+        os.setgroups([])           # Drop supplementary groups
+        os.setgid(target_gid)      # Set GID first (can't do it after setuid)
+        os.setuid(target_uid)      # Drop to unprivileged user
+        logger.info("Dropped privileges to %s (uid=%d, gid=%d)", user, target_uid, target_gid)
+    except KeyError as e:
+        logger.error("Unknown user or group for privilege drop: %s", e)
+        sys.exit(1)
+    except PermissionError as e:
+        logger.error("Failed to drop privileges: %s", e)
+        sys.exit(1)
 
 def process_dns_query(data, protocol_name, client_ip, client_port):
     try:
@@ -237,6 +259,8 @@ def main():
     parser.add_argument('--doq', action='store_true', help='Listen to DNS over QUIC (DoQ). Requires aioquic.')
     parser.add_argument('--doq-port', type=int, default=853, help='The port for DoQ (default: 853).')
     parser.add_argument('--workers', type=int, default=100, help='Maximum number of threads for processing requests (default: 100).')
+    parser.add_argument('--user', type=str, default=None, help='Drop privileges to this user after binding sockets (Linux only).')
+    parser.add_argument('--group', type=str, default=None, help='Drop privileges to this group after binding sockets (Linux only). Defaults to the user\'s primary group.')
     args = parser.parse_args()
 
     config = vars(args).copy()
@@ -257,7 +281,7 @@ def main():
                 if k in sec: config[k] = sec.getboolean(k)
             for k in ['port', 'tls_port', 'doh_port', 'doq_port', 'max_log_size', 'workers']:
                 if k in sec: config[k] = sec.getint(k)
-            for k in ['cert', 'key', 'log_file', 'host']:
+            for k in ['cert', 'key', 'log_file', 'host', 'user', 'group']:
                 if k in sec: config[k] = sec.get(k)
 
     if not (config['udp'] or config['tcp'] or config['tls'] or config['doh'] or config['doq']): 
@@ -301,6 +325,10 @@ def main():
         doq_thread = threading.Thread(target=start_doq_server, args=(config['host'], config['doq_port'], config['cert'], config['key']))
         doq_thread.daemon = True
         doq_thread.start()
+
+    # All sockets are now bound — safe to drop root privileges
+    if config.get('user'):
+        drop_privileges(config['user'], config.get('group'))
 
     for s in servers:
         thread = threading.Thread(target=s.serve_forever)  # that thread will start one more thread for each request

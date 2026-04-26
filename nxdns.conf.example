@@ -21,6 +21,12 @@ workers = 100
 # Path to the log file
 log_file = dns_log.txt
 
+# Drop privileges to this user/group after binding sockets (Linux only, recommended for production)
+# The user must exist on the system. Create with:
+#   useradd --system --no-create-home --shell /sbin/nologin nxdns
+# user = nxdns
+# group = nxdns
+
 # TLS/SSL Certificates (Required for DoT, DoH, and DoQ)
 # cert = cert.pem
 # key = key.pem

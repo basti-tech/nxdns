@@ -66,6 +66,8 @@ python nxdns.py --udp --tcp
 - `--workers`: Maximum number of threads for processing requests (default is `100`). *Recommendation: `100` is perfect for small/home servers. Increase to `200`-`500` for public-facing servers with heavy traffic to mitigate slow-connection exhaustion.*
 - `--max-log-size`: Maximum size of the log file in MB before rotation (default is `5`).
 - `--log-file`: Path to the log file (default is `dns_log.txt`).
+- `--user`: Drop privileges to this system user after binding sockets (Linux only). Strongly recommended for production use.
+- `--group`: Drop privileges to this group after binding sockets (Linux only). Defaults to the user's primary group.
 
 *Note: You must specify at least one of `--udp`, `--tcp`, or `--tls`.*
 
@@ -167,6 +169,30 @@ kdig -d @127.0.0.1 +quic -p 853 example.com
 ```
 Look for `status: NXDOMAIN` in the output header.
 
+
+## Security
+
+For production deployments, running the server as root long-term is unnecessary and risky. `nxdns` can drop its privileges automatically after binding the sockets.
+
+**1. Create a dedicated system user:**
+```bash
+useradd --system --no-create-home --shell /sbin/nologin nxdns
+chown nxdns:nxdns dns_log.txt
+```
+
+**2. Start as root with automatic privilege drop:**
+```bash
+sudo python nxdns.py --udp --tcp --user nxdns
+```
+
+After binding port 53, the process immediately drops to the `nxdns` user. The log will confirm:
+```
+2026-04-26 12:55:00 - INFO - Dropped privileges to nxdns (uid=999, gid=999)
+```
+
+Once privileges are dropped, the process cannot regain root access — even in the event of a vulnerability in the DNS parsing logic.
+
+> **Note:** `--user` / `--group` only work on Linux/macOS. `pwd` and `grp` are not available on Windows.
 
 ## Logging
 
