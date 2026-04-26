@@ -14,8 +14,12 @@ max_log_size = 5
 # Path to the log file
 log_file = dns_log.txt
 
-# DNS over TLS Support
+# TLS Support (DoT)
 # tls = false
 # tls_port = 853
 # cert = cert.pem
 # key = key.pem
+
+# HTTPS Support (DoH)
+# doh = false
+# doh_port = 443

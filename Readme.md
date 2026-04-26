@@ -9,6 +9,7 @@ This is particularly useful for sinkholing, testing network applications, malwar
 - Always returns `NXDOMAIN` for any DNS query.
 - Supports both UDP and TCP connections on port 53 (or a custom port).
 - Supports DNS over TLS (DoT) on port 853.
+- Supports DNS over HTTPS (DoH) on port 443.
 - Multi-threaded: handles each request in a separate thread.
 - Logs all incoming requests (including the requested domain, IP, and protocol) to the console and a file (`dns_log.txt`) with log rotation.
 
@@ -33,8 +34,10 @@ python nxdns.py --udp --tcp
 - `--udp`: Listen to UDP datagrams.
 - `--tls`: Listen to DNS over TLS (DoT) connections.
 - `--tls-port`: The port for DoT (default is `853`).
-- `--cert`: Path to the TLS certificate (required for `--tls`).
-- `--key`: Path to the TLS private key (required for `--tls`).
+- `--doh`: Listen to DNS over HTTPS (DoH) connections.
+- `--doh-port`: The port for DoH (default is `443`).
+- `--cert`: Path to the TLS certificate (required for `--tls` and `--doh`).
+- `--key`: Path to the TLS private key (required for `--tls` and `--doh`).
 - `--max-log-size`: Maximum size of the log file in MB before rotation (default is `5`).
 - `--log-file`: Path to the log file (default is `dns_log.txt`).
 
@@ -67,11 +70,15 @@ tcp = true
 max_log_size = 10
 log_file = /var/log/nxdns.log
 
-# TLS Support
+# TLS Support (DoT)
 tls = false
 tls_port = 853
 cert = cert.pem
 key = key.pem
+
+# HTTPS Support (DoH)
+doh = false
+doh_port = 443
 ```
 
 ## Logging
