@@ -1,0 +1,18 @@
+[nxdns]
+# The port to listen on
+port = 53
+
+# Listen to UDP connections
+udp = true
+
+# Listen to TCP connections
+tcp = true
+
+# Maximum log file size in Megabytes (MB)
+max_log_size = 5
+
+# DNS over TLS Support
+# tls = false
+# tls_port = 853
+# cert = cert.pem
+# key = key.pem

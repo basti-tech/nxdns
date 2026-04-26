@@ -8,6 +8,7 @@ This is particularly useful for sinkholing, testing network applications, malwar
 
 - Always returns `NXDOMAIN` for any DNS query.
 - Supports both UDP and TCP connections on port 53 (or a custom port).
+- Supports DNS over TLS (DoT) on port 853.
 - Multi-threaded: handles each request in a separate thread.
 - Logs all incoming requests (including the requested domain, IP, and protocol) to the console and a file (`dns_log.txt`) with log rotation.
 
@@ -26,17 +27,49 @@ python nxdns.py --udp --tcp
 
 ### Arguments
 
+- `-c`, `--config`: Path to the configuration file (default is `nxdns.conf`).
 - `--port`: The port to listen on (default is `53`).
 - `--tcp`: Listen to TCP connections.
 - `--udp`: Listen to UDP datagrams.
+- `--tls`: Listen to DNS over TLS (DoT) connections.
+- `--tls-port`: The port for DoT (default is `853`).
+- `--cert`: Path to the TLS certificate (required for `--tls`).
+- `--key`: Path to the TLS private key (required for `--tls`).
+- `--max-log-size`: Maximum size of the log file in MB before rotation (default is `5`).
 
-*Note: You must specify at least one of `--udp` or `--tcp`.*
+*Note: You must specify at least one of `--udp`, `--tcp`, or `--tls`.*
 
 ### Example
 
 Start the server on port 8053 listening only to UDP:
 ```bash
 python nxdns.py --port 8053 --udp
+```
+
+Start the server with DoT support:
+```bash
+python nxdns.py --tls --cert cert.pem --key key.pem
+```
+
+## Configuration File
+
+Instead of passing all parameters via the command line, you can use a configuration file (`nxdns.conf`). The server will automatically load `nxdns.conf` if it exists in the same directory, or you can specify one using `-c config_file.conf`. 
+
+Command-line switches will override the configuration file.
+
+Example `nxdns.conf`:
+```ini
+[nxdns]
+port = 53
+udp = true
+tcp = true
+max_log_size = 10
+
+# TLS Support
+tls = false
+tls_port = 853
+cert = cert.pem
+key = key.pem
 ```
 
 ## Logging

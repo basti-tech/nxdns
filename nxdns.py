@@ -7,6 +7,9 @@ import struct
 import datetime
 import traceback
 import logging
+import ssl
+import configparser
+import os
 from logging.handlers import RotatingFileHandler
 from dnslib import *
 
@@ -25,7 +28,7 @@ class BaseRequestHandler(socketserver.BaseRequestHandler):
         raise NotImplementedError
 
     def handle(self):
-        logger = logging.getLogger('fake_dns')
+        logger = logging.getLogger('nxdns')
         try:
             data = self.get_data()
             try:
@@ -69,15 +72,61 @@ class UDPRequestHandler(BaseRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description='Start a Fake DNS implemented in Python. Only returns NXDOMAIN and logs requests into a file. Usually DNSes use UDP on port 53.')
-    parser.add_argument('--port', default=53, type=int, help='The port to listen on.')
+    parser.add_argument('-c', '--config', type=str, help='Path to configuration file.')
+    parser.add_argument('--port', type=int, help='The port to listen on.')
     parser.add_argument('--tcp', action='store_true', help='Listen to TCP connections.')
     parser.add_argument('--udp', action='store_true', help='Listen to UDP datagrams.')
+    parser.add_argument('--tls', action='store_true', help='Listen to DNS over TLS (DoT).')
+    parser.add_argument('--tls-port', type=int, help='The port for DoT (default: 853).')
+    parser.add_argument('--cert', type=str, help='Path to the TLS certificate file (required for DoT).')
+    parser.add_argument('--key', type=str, help='Path to the TLS private key file (required for DoT).')
+    parser.add_argument('--max-log-size', type=int, help='Maximum log file size in MB.')
     args = parser.parse_args()
-    if not (args.udp or args.tcp): parser.error("Please select at least one of --udp or --tcp.")
 
-    logger = logging.getLogger('fake_dns')
+    config = {
+        'port': 53,
+        'tcp': False,
+        'udp': False,
+        'tls': False,
+        'tls_port': 853,
+        'cert': None,
+        'key': None,
+        'max_log_size': 5
+    }
+
+    config_file = args.config if args.config else 'nxdns.conf'
+    if os.path.exists(config_file):
+        cp = configparser.ConfigParser()
+        cp.read(config_file)
+        if 'nxdns' in cp:
+            sec = cp['nxdns']
+            if 'port' in sec: config['port'] = sec.getint('port')
+            if 'tcp' in sec: config['tcp'] = sec.getboolean('tcp')
+            if 'udp' in sec: config['udp'] = sec.getboolean('udp')
+            if 'tls' in sec: config['tls'] = sec.getboolean('tls')
+            if 'tls_port' in sec: config['tls_port'] = sec.getint('tls_port')
+            if 'cert' in sec: config['cert'] = sec.get('cert')
+            if 'key' in sec: config['key'] = sec.get('key')
+            if 'max_log_size' in sec: config['max_log_size'] = sec.getint('max_log_size')
+
+    # CLI overrides
+    if args.port is not None: config['port'] = args.port
+    if args.tcp: config['tcp'] = True
+    if args.udp: config['udp'] = True
+    if args.tls: config['tls'] = True
+    if args.tls_port is not None: config['tls_port'] = args.tls_port
+    if args.cert is not None: config['cert'] = args.cert
+    if args.key is not None: config['key'] = args.key
+    if args.max_log_size is not None: config['max_log_size'] = args.max_log_size
+
+    if not (config['udp'] or config['tcp'] or config['tls']): 
+        parser.error("Please select at least one of --udp, --tcp, or --tls (via CLI or config file).")
+    if config['tls'] and (not config['cert'] or not config['key']): 
+        parser.error("--tls requires --cert and --key to be provided.")
+
+    logger = logging.getLogger('nxdns')
     logger.setLevel(logging.INFO)
-    fh = RotatingFileHandler('dns_log.txt', maxBytes=5*1024*1024, backupCount=5)
+    fh = RotatingFileHandler('dns_log.txt', maxBytes=config['max_log_size']*1024*1024, backupCount=5)
     fh.setLevel(logging.INFO)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
@@ -90,14 +139,21 @@ def main():
     logger.info("Starting nameserver...")
 
     servers = []
-    if args.udp: servers.append(socketserver.ThreadingUDPServer(('', args.port), UDPRequestHandler))
-    if args.tcp: servers.append(socketserver.ThreadingTCPServer(('', args.port), TCPRequestHandler))
+    if config['udp']: servers.append(socketserver.ThreadingUDPServer(('', config['port']), UDPRequestHandler))
+    if config['tcp']: servers.append(socketserver.ThreadingTCPServer(('', config['port']), TCPRequestHandler))
+    
+    if config['tls']:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=config['cert'], keyfile=config['key'])
+        tls_server = socketserver.ThreadingTCPServer(('', config['tls_port']), TCPRequestHandler)
+        tls_server.socket = context.wrap_socket(tls_server.socket, server_side=True)
+        servers.append(tls_server)
 
     for s in servers:
         thread = threading.Thread(target=s.serve_forever)  # that thread will start one more thread for each request
         thread.daemon = True  # exit the server thread when the main thread terminates
         thread.start()
-        logger = logging.getLogger('fake_dns')
+        logger = logging.getLogger('nxdns')
         logger.info("%s server loop running in thread: %s", s.RequestHandlerClass.__name__[:3], thread.name)
 
     try:
