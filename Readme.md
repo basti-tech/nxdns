@@ -62,6 +62,7 @@ python nxdns.py --udp --tcp
 - `--doq-port`: The port for DoQ (default is `853`).
 - `--cert`: Path to the TLS certificate (required for `--tls`, `--doh`, and `--doq`).
 - `--key`: Path to the TLS private key (required for `--tls`, `--doh`, and `--doq`).
+- `--workers`: Maximum number of threads for processing requests (default is `100`). *Recommendation: `100` is perfect for small/home servers. Increase to `200`-`500` for public-facing servers with heavy traffic to mitigate slow-connection exhaustion.*
 - `--max-log-size`: Maximum size of the log file in MB before rotation (default is `5`).
 - `--log-file`: Path to the log file (default is `dns_log.txt`).
 
@@ -83,7 +84,7 @@ python nxdns.py --tls --cert cert.pem --key key.pem
 
 Instead of passing all parameters via the command line, you can use a configuration file (`nxdns.conf`). The server will automatically load `nxdns.conf` if it exists in the same directory, or you can specify one using `-c config_file.conf`. 
 
-Command-line switches will override the configuration file.
+**Note:** The use of CLI switches and the configuration file is mutually exclusive. If you provide any configuration parameters via CLI, the configuration file will be completely ignored.
 
 Example `nxdns.conf`:
 ```ini
@@ -91,6 +92,7 @@ Example `nxdns.conf`:
 port = 53
 udp = true
 tcp = true
+workers = 100
 max_log_size = 10
 log_file = /var/log/nxdns.log
 

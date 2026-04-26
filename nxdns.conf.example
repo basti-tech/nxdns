@@ -11,6 +11,9 @@ tcp = true
 # Maximum log file size in Megabytes (MB)
 max_log_size = 5
 
+# Maximum number of threads for processing requests
+workers = 100
+
 # Path to the log file
 log_file = dns_log.txt
 
