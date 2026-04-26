@@ -188,11 +188,23 @@ class DoQProtocol(QuicConnectionProtocol):
                 peername = self._transport.get_extra_info('peername')
                 client_ip = peername[0] if peername else "Unknown"
                 client_port = peername[1] if peername else 0
-                response = process_dns_query(event.data, "DoQ", client_ip, client_port)
-                self._quic.send_stream_data(event.stream_id, response, end_stream=True)
+
+                # RFC 9250: DoQ DNS messages are prefixed with a 2-byte length (same as TCP)
+                data = event.data
+                if len(data) < 2:
+                    raise ValueError("DoQ stream data too short")
+                sz = struct.unpack('>H', data[:2])[0]
+                dns_data = data[2:2 + sz]
+
+                response = process_dns_query(dns_data, "DoQ", client_ip, client_port)
+
+                # Prepend 2-byte length prefix on the response
+                prefixed = struct.pack('>H', len(response)) + response
+                self._quic.send_stream_data(event.stream_id, prefixed, end_stream=True)
                 self.transmit()
             except Exception as e:
                 logger.error("DoQ error: %s", e)
+
 
 def start_doq_server(host, port, cert, key):
     loop = asyncio.new_event_loop()
