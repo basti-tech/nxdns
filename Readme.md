@@ -96,11 +96,13 @@ workers = 100
 max_log_size = 10
 log_file = /var/log/nxdns.log
 
+# TLS/SSL Certificates (Required for DoT, DoH, and DoQ)
+cert = cert.pem
+key = key.pem
+
 # TLS Support (DoT)
 tls = false
 tls_port = 853
-cert = cert.pem
-key = key.pem
 
 # HTTPS Support (DoH)
 doh = false
