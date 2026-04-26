@@ -23,21 +23,18 @@ from aioquic.asyncio import QuicConnectionProtocol, serve
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import StreamDataReceived
 
-def dns_response(data):
-    request = DNSRecord.parse(data)
-    reply = request.reply()
-    reply.header.rcode = RCODE.NXDOMAIN
-    return reply.pack()
-
 def process_dns_query(data, protocol_name, client_ip, client_port):
     try:
         request = DNSRecord.parse(data)
         qname = str(request.q.qname)
-    except Exception:
-        qname = "<unparsable>"
-    
-    logger.info("%s request from %s:%s for %s", protocol_name, client_ip, client_port, qname)
-    return dns_response(data)
+        logger.info("%s request from %s:%s for %s", protocol_name, client_ip, client_port, qname)
+        
+        reply = request.reply()
+        reply.header.rcode = RCODE.NXDOMAIN
+        return reply.pack()
+    except Exception as e:
+        logger.warning("%s unparsable/invalid request from %s:%s - %s", protocol_name, client_ip, client_port, str(e))
+        raise ValueError("Invalid DNS packet")
 
 class ThreadPoolMixIn:
     def process_request(self, request, client_address):
