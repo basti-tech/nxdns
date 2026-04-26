@@ -232,11 +232,9 @@ class DoQProtocol(QuicConnectionProtocol):
 
 
 
-def start_doq_server(cert, key, sock):
+def start_doq_server(configuration, sock):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    configuration = QuicConfiguration(is_client=False, alpn_protocols=["doq"])
-    configuration.load_cert_chain(cert, key)
     loop.run_until_complete(serve(configuration=configuration, create_protocol=DoQProtocol, sock=sock))
     logger.info("DoQ server loop running in background asyncio loop")
     loop.run_forever()
@@ -322,7 +320,9 @@ def main():
             servers.append(doh_server)
 
     if config['doq']:
-        # Pre-bind the DoQ UDP socket as root so it survives the privilege drop
+        # Pre-build config and pre-bind socket as root so both survive the privilege drop
+        doq_configuration = QuicConfiguration(is_client=False, alpn_protocols=["doq"])
+        doq_configuration.load_cert_chain(config['cert'], config['key'])
         host = config['host']
         af = socket.AF_INET6 if ':' in host else socket.AF_INET
         doq_sock = socket.socket(af, socket.SOCK_DGRAM)
@@ -330,7 +330,7 @@ def main():
             doq_sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
         doq_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         doq_sock.bind((host, config['doq_port']))
-        doq_thread = threading.Thread(target=start_doq_server, args=(config['cert'], config['key'], doq_sock))
+        doq_thread = threading.Thread(target=start_doq_server, args=(doq_configuration, doq_sock))
         doq_thread.daemon = True
         doq_thread.start()
 
