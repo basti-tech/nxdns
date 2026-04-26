@@ -185,9 +185,12 @@ class DoQProtocol(QuicConnectionProtocol):
     def quic_event_received(self, event):
         if isinstance(event, StreamDataReceived):
             try:
-                peername = self._transport.get_extra_info('peername')
-                client_ip = peername[0] if peername else "Unknown"
-                client_port = peername[1] if peername else 0
+                # Get client address from QUIC network paths (transport peername is None for QUIC/UDP)
+                paths = self._quic._network_paths
+                if paths:
+                    client_ip, client_port = paths[0].addr[0], paths[0].addr[1]
+                else:
+                    client_ip, client_port = "Unknown", 0
 
                 # RFC 9250: DoQ DNS messages are prefixed with a 2-byte length (same as TCP)
                 data = event.data
@@ -204,6 +207,7 @@ class DoQProtocol(QuicConnectionProtocol):
                 self.transmit()
             except Exception as e:
                 logger.error("DoQ error: %s", e)
+
 
 
 def start_doq_server(host, port, cert, key):
