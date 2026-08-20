@@ -4,6 +4,9 @@
 
 This is particularly useful for sinkholing, network application testing, malware analysis, ad/tracker blocking, and unwanted traffic isolation.
 
+> **💡 About this Project**: `nxdns` originally started as a personal, hand-crafted Python script for simple DNS sinkholing. With the assistance of AI, the project was modernized and extended to include missing modern features—notably full **DNS over HTTPS (DoH)** and **DNS over QUIC (DoQ)** support, robust threaded connection handling, and automated privilege dropping.
+
+
 ## Features
 
 - **Always NXDOMAIN**: Responds to all valid DNS queries with `NXDOMAIN` (Authoritative Answer `AA=1`).
