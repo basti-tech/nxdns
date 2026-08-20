@@ -14,20 +14,25 @@ import ssl
 import configparser
 import os
 import socket
-import pwd
-import grp
+try:
+    import pwd
+    import grp
+except ImportError:
+    pwd = None
+    grp = None
+
 import http.server
 import urllib.parse
 import base64
 from logging.handlers import RotatingFileHandler
 from dnslib import *
 import asyncio
-from aioquic.asyncio import QuicConnectionProtocol, serve
-from aioquic.quic.configuration import QuicConfiguration
-from aioquic.quic.events import StreamDataReceived
 
 def drop_privileges(user, group=None):
     """Drop root privileges to the specified user/group after sockets are bound."""
+    if pwd is None or grp is None:
+        logger.warning("--user/--group specified but not supported on this platform, skipping privilege drop.")
+        return
     if os.getuid() != 0:
         logger.warning("--user specified but not running as root, skipping privilege drop.")
         return
@@ -49,10 +54,17 @@ def drop_privileges(user, group=None):
 def process_dns_query(data, protocol_name, client_ip, client_port):
     try:
         request = DNSRecord.parse(data)
-        qname = str(request.q.qname)
-        logger.info("%s request from %s:%s for %s", protocol_name, client_ip, client_port, qname)
+        if request.q:
+            qname = str(request.q.qname)
+            qtype = QTYPE.get(request.q.qtype, str(request.q.qtype))
+        else:
+            qname = "<empty>"
+            qtype = "<none>"
+
+        logger.info("%s request from %s:%s for %s (%s)", protocol_name, client_ip, client_port, qname, qtype)
         
         reply = request.reply()
+        reply.header.aa = 1
         reply.header.rcode = RCODE.NXDOMAIN
         return reply.pack()
     except Exception as e:
@@ -115,8 +127,14 @@ class BaseRequestHandler(socketserver.BaseRequestHandler):
     def handle(self):
         try:
             data = self.get_data()
+            if data is None:
+                return
             response = process_dns_query(data, self.__class__.__name__[:3], self.client_address[0], self.client_address[1])
             self.send_data(response)
+        except (ConnectionResetError, BrokenPipeError, TimeoutError, socket.timeout):
+            pass
+        except ValueError:
+            pass
         except Exception as e:
             logger.exception("Error handling request from %s:%s", self.client_address[0], self.client_address[1])
 
@@ -127,10 +145,19 @@ class DoHRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/dns-message')
             self.send_header('Content-Length', str(len(response)))
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(response)
         except Exception as e:
             self.send_error(400, "Bad Request")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Accept')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
 
     def do_GET(self):
         parsed_path = urllib.parse.urlparse(self.path)
@@ -143,7 +170,7 @@ class DoHRequestHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(400, "Missing dns parameter")
             return
         try:
-            padding = '=' * (4 - (len(dns_param) % 4))
+            padding = '=' * (-len(dns_param) % 4)
             data = base64.urlsafe_b64decode(dns_param + padding)
             self.send_dns_response(data)
         except Exception:
@@ -174,11 +201,13 @@ class TCPRequestHandler(BaseRequestHandler):
 
     def get_data(self):
         raw_len = self._recv_exact(2)
+        if not raw_len:
+            return None
         sz = struct.unpack('>H', raw_len)[0]
         if sz == 0:
-            raise Exception("TCP packet has zero length")
+            return None
         if sz > self.MAX_DNS_PACKET:
-            raise Exception(f"TCP packet too large: {sz} bytes (max {self.MAX_DNS_PACKET})")
+            raise ValueError(f"TCP packet too large: {sz} bytes (max {self.MAX_DNS_PACKET})")
         return self._recv_exact(sz)
 
     def _recv_exact(self, n):
@@ -186,7 +215,9 @@ class TCPRequestHandler(BaseRequestHandler):
         while len(buf) < n:
             chunk = self.request.recv(n - len(buf))
             if not chunk:
-                raise Exception("Connection closed before complete packet received")
+                if not buf:
+                    return None
+                raise ConnectionResetError("Connection closed before complete packet received")
             buf += chunk
         return buf
 
@@ -203,36 +234,42 @@ class UDPRequestHandler(BaseRequestHandler):
     def send_data(self, data):
         return self.request[1].sendto(data, self.client_address)
 
-class DoQProtocol(QuicConnectionProtocol):
-    def quic_event_received(self, event):
-        if isinstance(event, StreamDataReceived):
-            try:
-                # Get client address from QUIC network paths (transport peername is None for QUIC/UDP)
-                paths = self._quic._network_paths
-                if paths:
-                    client_ip, client_port = paths[0].addr[0], paths[0].addr[1]
-                else:
-                    client_ip, client_port = "Unknown", 0
-
-                # RFC 9250: DoQ DNS messages are prefixed with a 2-byte length (same as TCP)
-                data = event.data
-                if len(data) < 2:
-                    raise ValueError("DoQ stream data too short")
-                sz = struct.unpack('>H', data[:2])[0]
-                dns_data = data[2:2 + sz]
-
-                response = process_dns_query(dns_data, "DoQ", client_ip, client_port)
-
-                # Prepend 2-byte length prefix on the response
-                prefixed = struct.pack('>H', len(response)) + response
-                self._quic.send_stream_data(event.stream_id, prefixed, end_stream=True)
-                self.transmit()
-            except Exception as e:
-                logger.error("DoQ error: %s", e)
-
-
-
 def start_doq_server(cert, key, host, port, ready_event):
+    try:
+        from aioquic.asyncio import QuicConnectionProtocol, serve
+        from aioquic.quic.configuration import QuicConfiguration
+        from aioquic.quic.events import StreamDataReceived
+    except ImportError:
+        logger.error("aioquic is required for DoQ support. Install it with: pip install aioquic")
+        sys.exit(1)
+
+    class DoQProtocol(QuicConnectionProtocol):
+        def quic_event_received(self, event):
+            if isinstance(event, StreamDataReceived):
+                try:
+                    # Get client address from QUIC network paths (transport peername is None for QUIC/UDP)
+                    paths = self._quic._network_paths
+                    if paths:
+                        client_ip, client_port = paths[0].addr[0], paths[0].addr[1]
+                    else:
+                        client_ip, client_port = "Unknown", 0
+
+                    # RFC 9250: DoQ DNS messages are prefixed with a 2-byte length (same as TCP)
+                    data = event.data
+                    if len(data) < 2:
+                        raise ValueError("DoQ stream data too short")
+                    sz = struct.unpack('>H', data[:2])[0]
+                    dns_data = data[2:2 + sz]
+
+                    response = process_dns_query(dns_data, "DoQ", client_ip, client_port)
+
+                    # Prepend 2-byte length prefix on the response
+                    prefixed = struct.pack('>H', len(response)) + response
+                    self._quic.send_stream_data(event.stream_id, prefixed, end_stream=True)
+                    self.transmit()
+                except Exception as e:
+                    logger.error("DoQ error: %s", e)
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     configuration = QuicConfiguration(is_client=False, alpn_protocols=["doq"])
@@ -260,7 +297,7 @@ def main():
     parser.add_argument('--cert', type=str, help='Path to the TLS certificate file (required for DoT/DoH/DoQ).')
     parser.add_argument('--key', type=str, help='Path to the TLS private key file (required for DoT/DoH/DoQ).')
     parser.add_argument('--max-log-size', type=int, default=5, help='Maximum log file size in MB.')
-    parser.add_argument('--log-file', type=str, default='nxdns_log.txt', help='Path to the log file (default: nxdns_log.txt).')
+    parser.add_argument('--log-file', type=str, default='dns_log.txt', help='Path to the log file (default: dns_log.txt).')
     parser.add_argument('--doq', action='store_true', help='Listen to DNS over QUIC (DoQ). Requires aioquic.')
     parser.add_argument('--doq-port', type=int, default=853, help='The port for DoQ (default: 853).')
     parser.add_argument('--workers', type=int, default=100, help='Maximum number of threads for processing requests (default: 100).')
