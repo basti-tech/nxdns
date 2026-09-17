@@ -441,18 +441,13 @@ def main():
     )
     parser.add_argument('--host', type=str, default=None, help='The interface to listen on (default: 127.0.0.1). Use :: or "" for DualStack support.')
     parser.add_argument('--port', type=int, default=None, help='The port to listen on (default: 53).')
-    parser.add_argument('--tcp', dest='tcp', action='store_true', default=None, help='Listen to TCP connections.')
-    parser.add_argument('--no-tcp', dest='tcp', action='store_false', help='Disable TCP connections.')
-    parser.add_argument('--udp', dest='udp', action='store_true', default=None, help='Listen to UDP datagrams.')
-    parser.add_argument('--no-udp', dest='udp', action='store_false', help='Disable UDP datagrams.')
-    parser.add_argument('--tls', dest='tls', action='store_true', default=None, help='Listen to DNS over TLS (DoT).')
-    parser.add_argument('--no-tls', dest='tls', action='store_false', help='Disable DoT.')
+    parser.add_argument('--tcp', action='store_true', help='Listen to TCP connections.')
+    parser.add_argument('--udp', action='store_true', help='Listen to UDP datagrams.')
+    parser.add_argument('--tls', action='store_true', help='Listen to DNS over TLS (DoT).')
     parser.add_argument('--tls-port', type=int, default=None, help='The port for DoT (default: 853).')
-    parser.add_argument('--doh', dest='doh', action='store_true', default=None, help='Listen to DNS over HTTPS (DoH).')
-    parser.add_argument('--no-doh', dest='doh', action='store_false', help='Disable DoH.')
+    parser.add_argument('--doh', action='store_true', help='Listen to DNS over HTTPS (DoH).')
     parser.add_argument('--doh-port', type=int, default=None, help='The port for DoH (default: 443).')
-    parser.add_argument('--doq', dest='doq', action='store_true', default=None, help='Listen to DNS over QUIC (DoQ). Requires aioquic.')
-    parser.add_argument('--no-doq', dest='doq', action='store_false', help='Disable DoQ.')
+    parser.add_argument('--doq', action='store_true', help='Listen to DNS over QUIC (DoQ). Requires aioquic.')
     parser.add_argument('--doq-port', type=int, default=None, help='The port for DoQ (default: 853).')
     parser.add_argument('--cert', type=str, default=None, help='Path to the TLS certificate file (required for DoT/DoH/DoQ).')
     parser.add_argument('--key', type=str, default=None, help='Path to the TLS private key file (required for DoT/DoH/DoQ).')
@@ -464,9 +459,16 @@ def main():
     args = parser.parse_args()
 
     config = defaults.copy()
+    protocol_flags = {'tcp', 'udp', 'tls', 'doh', 'doq'}
+    cli_protocols_specified = any(arg in sys.argv for arg in ['--tcp', '--udp', '--tls', '--doh', '--doq'])
+
     for k, v in vars(args).items():
-        if v is not None:
-            config[k] = v
+        if k in protocol_flags:
+            if cli_protocols_specified:
+                config[k] = v
+        else:
+            if v is not None:
+                config[k] = v
 
     if not (config['udp'] or config['tcp'] or config['tls'] or config['doh'] or config['doq']):
         parser.error("Please select at least one of --udp, --tcp, --tls, --doh, or --doq (via CLI or config file).")

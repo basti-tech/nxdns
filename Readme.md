@@ -79,7 +79,7 @@ python nxdns.py --udp --tcp
 | `--user` | string | `None` | Drop root privileges to this system user after socket binding (Linux only) |
 | `--group` | string | `None` | Drop root privileges to this group after socket binding (Linux only) |
 
-> **Note:** You must enable at least one protocol: `--udp`, `--tcp`, `--tls`, `--doh`, or `--doq`.
+> **Note:** You must enable at least one protocol (`--udp`, `--tcp`, `--tls`, `--doh`, or `--doq`), either via command-line arguments or inside your configuration file.
 
 ### CLI Examples
 
@@ -98,11 +98,23 @@ sudo python nxdns.py --tls --doh --doq --cert /etc/ssl/certs/server.crt --key /e
 sudo python nxdns.py --host "::" --udp --tcp --user nxdns
 ```
 
+**Override config file settings via CLI:**
+```bash
+# If nxdns.conf defines multiple protocols, passing only --udp runs exclusively UDP on port 8053
+python nxdns.py -c nxdns.conf --udp --port 8053
+```
+
 ---
 
-## Configuration File
+## Configuration File & CLI Precedence
 
-Instead of command-line flags, you can configure `nxdns` via `nxdns.conf`. If `nxdns.conf` exists in the working directory (or is specified with `-c <file>`), it will be loaded automatically if no CLI options (other than `-c`) are given.
+`nxdns` can be fully configured using a configuration file (`nxdns.conf` in the current working directory, or specified with `-c <path>`).
+
+### Configuration Precedence:
+1. **Config File Defaults**: If `nxdns.conf` exists (or is specified via `-c`), its values serve as the base configuration.
+2. **CLI Overrides**: Any command-line arguments you pass take precedence over the configuration file:
+   - **General parameters** (like `--port`, `--host`, `--workers`, `--user`): Override their config file counterpart.
+   - **Protocol selection** (`--udp`, `--tcp`, `--tls`, `--doh`, `--doq`): If any protocol flag is supplied on the command line, only the explicitly passed protocol(s) will be active; any unmentioned protocols remain disabled. If no protocol flags are passed on the CLI, the protocols configured in the configuration file remain active.
 
 ### Example `nxdns.conf`
 
